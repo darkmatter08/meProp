@@ -10,14 +10,14 @@ import torch.cuda
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
-from torch.autograd import Variable
+from torch.autograd import Variable  # TODO move away from Variable.
 
 from model import NetLayer
 
 
 class TestGroup(object):
     '''
-    A network and k in meporp form a test group.
+    A network and k in meprop form a test group.
     Test groups differ in minibatch size, hidden features, layer number and dropout rate.
     '''
 
@@ -34,13 +34,13 @@ class TestGroup(object):
                  cudatensor=False,
                  file=sys.stdout):
         self.args = args
-        self.mb = mb
-        self.hidden = hidden
-        self.layer = layer
-        self.dropout = dropout
-        self.file = file
-        self.trnset = trnset
-        self.unified = unified
+        self.mb = mb  # mini-batch size
+        self.hidden = hidden  # hidden dimension
+        self.layer = layer  #???
+        self.dropout = dropout  # dropout rate
+        self.file = file  # output file (default=stdout)
+        self.trnset = trnset  # training set
+        self.unified = unified  # unified -- refers to how batching is implemented
 
         if cudatensor:  # dataset is on GPU
             self.trainloader = torch.utils.data.DataLoader(
@@ -132,7 +132,7 @@ class TestGroup(object):
             end.synchronize()
             utime += start.elapsed_time(end)
 
-            tloss += loss.data[0]
+            tloss += loss.data.item()
         tloss /= len(self.trainloader)
         return tloss, ftime, btime, utime
 
@@ -148,7 +148,7 @@ class TestGroup(object):
             data, target = Variable(
                 data, volatile=True).cuda(), Variable(target).cuda()
             output = model(data)
-            test_loss += F.nll_loss(output, target).data[0]
+            test_loss += F.nll_loss(output, target).data.item()
             pred = output.data.max(1)[
                 1]  # get the index of the max log-probability
             correct += pred.eq(target.data).cpu().sum()
@@ -173,7 +173,7 @@ class TestGroup(object):
         if epoch is None:
             epoch = self.args.n_epoch
         print(
-            'mbsize: {}, hidden size: {}, layer: {}, dropout: {}, k: {}'.
+            'mini-batch size: {}, hidden size: {}, number_layers: {}, dropout: {}, k: {}'.
             format(self.mb, self.hidden, self.layer, self.dropout, k),
             file=self.file)
         # Init the model, the optimizer and some structures for logging
@@ -181,11 +181,14 @@ class TestGroup(object):
 
         model = NetLayer(self.hidden, k, self.layer, self.dropout,
                          self.unified)
-        #print(model)
+        print('==='*10)
+        print('model:')
+        print(model)
+        print('==='*10)
         model.reset_parameters()
         model.cuda()
 
-        opt = optim.Adam(model.parameters())
+        opt = optim.Adam(model.parameters())  # default lr=0.001, betas=(0.9, 0.999), eps=1e-08,
 
         acc = 0  # best dev. acc.
         accc = 0  # test acc. at the time of best dev. acc.
@@ -199,7 +202,7 @@ class TestGroup(object):
 
         # training loop
         for t in range(epoch):
-            print('{}：'.format(t), end='', file=self.file, flush=True)
+            print('{}:'.format(t), end='', file=self.file, flush=True)
             # train
             start = torch.cuda.Event(True)
             end = torch.cuda.Event(True)
@@ -216,13 +219,14 @@ class TestGroup(object):
             utime.append(ut)
             # predict
             curacc = self._evaluate(model, self.devloader, 'dev')
-            if curacc > acc:
+            if curacc > acc:  # only eval on test set if dev accuracy has improved.
                 e = t
                 acc = curacc
                 accc = self._evaluate(model, self.testloader, '    test')
         etime = [sum(t) for t in zip(ftime, btime, utime)]
+        print('Best performance (by dev_acc):')
         print(
-            '${:.2f}|{:.2f} at {}'.format(acc, accc, e),
+            'dev_acc={:.2f} | test_acc={:.2f} at epoch={}'.format(acc, accc, e),
             file=self.file,
             flush=True)
         print('', file=self.file)

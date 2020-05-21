@@ -89,6 +89,7 @@ def get_args_unified():
 
 def main():
     args = get_args()
+    print('main() args=', args)
     trn, dev, tst = get_mnist()
 
     group = TestGroup(
@@ -173,6 +174,7 @@ def main():
 
 def main_unified():
     args = get_args_unified()
+    print('main_unified() args=', args)
     trn, dev, tst = get_mnist()
 
     # change the sys.stdout to a file object to write the results to the file
@@ -256,6 +258,6 @@ def main_unified():
 
 if __name__ == '__main__':
     # uncomment to run meprop
-    # main()
+    main()
     # run unified meprop
-    main_unified()
+    # main_unified()

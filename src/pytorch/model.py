@@ -23,6 +23,7 @@ class NetLayer(nn.Module):
     '''
 
     def __init__(self, hidden, k, layer, dropout=None, unified=False):
+        # layer: number of layers in this network.
         super(NetLayer, self).__init__()
         self.k = k
         self.layer = layer
@@ -35,14 +36,14 @@ class NetLayer(nn.Module):
             return OrderedDict([Linear(784, 10, 0)])
         d = OrderedDict()
         for i in range(layer):
-            if i == 0:
+            if i == 0:  # input layer case
                 d['linear' + str(i)] = Linear(784, hidden, k, self.unified)
                 d['relu' + str(i)] = nn.ReLU()
                 if dropout:
                     d['dropout' + str(i)] = nn.Dropout(p=dropout)
-            elif i == layer - 1:
+            elif i == layer - 1:  # final layer/readout layer.
                 d['linear' + str(i)] = Linear(hidden, 10, 0, self.unified)
-            else:
+            else:  # standard middle layer
                 d['linear' + str(i)] = Linear(hidden, hidden, k, self.unified)
                 d['relu' + str(i)] = nn.ReLU()
                 if dropout:
