@@ -32,7 +32,9 @@ class TestGroup(object):
                  devset=None,
                  tstset=None,
                  cudatensor=False,
-                 file=sys.stdout):
+                 file=sys.stdout,
+                 crs=False,
+                 strategy=None):
         self.args = args
         self.mb = mb  # mini-batch size
         self.hidden = hidden  # hidden dimension
@@ -41,6 +43,8 @@ class TestGroup(object):
         self.file = file  # output file (default=stdout)
         self.trnset = trnset  # training set
         self.unified = unified  # unified -- refers to how batching is implemented
+        self.crs = crs
+        self.strategy = strategy
 
         if cudatensor:  # dataset is on GPU
             self.trainloader = torch.utils.data.DataLoader(
@@ -180,7 +184,7 @@ class TestGroup(object):
         self.reset()
 
         model = NetLayer(self.hidden, k, self.layer, self.dropout,
-                         self.unified)
+                         self.unified, crs=self.crs, strategy=self.strategy)
         print('==='*10)
         print('model:')
         print(model)
