@@ -145,7 +145,7 @@ class linear(Function):
 
         return dx, dw, db
 
-SQUEEZE_OUT_BATCH = True
+SQUEEZE_OUT_BATCH = False
 
 class linear_crs(Function):
     '''
@@ -175,6 +175,11 @@ class linear_crs(Function):
         We find that that implementation is slower in both forward and backward propagation on our devices.
         '''
         self.save_for_backward(x, w, b)
+
+        # batch_size=10
+        # x.shape, w.shape, b.shape
+        # (torch.Size([10, 784]), torch.Size([512, 784]), torch.Size([512]))
+
         if not SQUEEZE_OUT_BATCH:
             # Get batch dim from x.shape[0]
             batch_size = x.shape[0]
@@ -186,6 +191,10 @@ class linear_crs(Function):
             w = w.squeeze()
             assert len(x.shape) == 1
 
+        if self.k <= 0:  # shortcut for baseline case
+            result = x @ w.T + b
+            return result
+
         B = x
         A = w
         k = self.k
@@ -196,15 +205,6 @@ class linear_crs(Function):
         assert A.shape[1] == B.shape[0]
         common_dimension = A.shape[1]
         assert common_dimension >= k
-
-        if k <= 0:
-            # shortcut return
-            result = w @ x + b
-            # TODO remove this unsqueeze once I fix the batching issue.
-            # add back in the batch dimension at the front.
-            if SQUEEZE_OUT_BATCH:
-                result.unsqueeze_(0)
-            return result
 
         if strategy == 'random':
             # Random Sampling (w/o replacement)
@@ -312,9 +312,9 @@ class linear_crs(Function):
         # (i.e. NOT numerator convention)
         # print('original shapes:')
         # print('dy.shape', dy.shape)
-        # # torch.Size([1, 512])
+        # torch.Size([1, 512])
         x, w, b = self.saved_tensors
-        # print('x.shape = ', x.shape) 
+        # print('x.shape = ', x.shape)
         # print('w.shape = ', w.shape)
         # print('b.shape = ', b.shape)
 
@@ -327,7 +327,7 @@ class linear_crs(Function):
 
         # Make sure that row vectors are row vectors (leading 1 in shape)
         # and column vectors are column vectors (trailing 1 in shape)
-        if 1:
+        if 0:
             if x.shape[-1] != 1 and len(x.shape) < 3:  # should be a col vector
                 # if we have less than a 3 tensor, and the last dim is not 1 not a true column vector
                 x = x.unsqueeze(-1)
@@ -350,11 +350,11 @@ class linear_crs(Function):
                 # TODO: How do we average over the batch dimension implicitly with matmul? Figure out the math.
                 # TODO: Is the averaging over the batch dimension an explicit operation, or is it done
                 # implicitly in the math?
-                dw = (x @ dy.T).T
+                dw = dy.T @ x
                 assert dw.shape == w.shape
 
             if self.needs_input_grad[0]:  # x
-                dx = (dy.T @ w).T
+                dx = dy @ w
                 # equiv. to dx = w.T @ dy
                 assert dx.shape == x.shape  # We actually need to match the shape of the original x.
                 # print('computed dx.shape', dx.shape)
