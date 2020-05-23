@@ -145,7 +145,6 @@ class linear(Function):
 
         return dx, dw, db
 
-SQUEEZE_OUT_BATCH = False
 
 class linear_crs(Function):
     '''
@@ -180,16 +179,7 @@ class linear_crs(Function):
         # x.shape, w.shape, b.shape
         # (torch.Size([10, 784]), torch.Size([512, 784]), torch.Size([512]))
 
-        if not SQUEEZE_OUT_BATCH:
-            # Get batch dim from x.shape[0]
-            batch_size = x.shape[0]
-        else:
-            # For now, hack to get working without batches
-            # print('x.shape', x.shape)
-            # print('w.shape', w.shape)
-            x = x.squeeze()
-            w = w.squeeze()
-            assert len(x.shape) == 1
+        batch_size = x.shape[0]
 
         if self.k <= 0:  # shortcut for baseline case
             result = x @ w.T + b
@@ -304,66 +294,18 @@ class linear_crs(Function):
         The sampling "mask" is saved from forward().
         TODO: What about multiple calls to forward()? How does gradient accum work with forward?
         '''
-        # TODO: Is `dy` a row vector or col vector?
-        # Following numerator-convention, dL/dy should be a row vector
-        # but what about the batch dimension of dy?
-        # I believe dy has a leading batch dimension
-        # I believe that dy.shape == y.shape == (dL/dy).T.shape
-        # (i.e. NOT numerator convention)
-        # print('original shapes:')
-        # print('dy.shape', dy.shape)
-        # torch.Size([1, 512])
+        # PyTorch convention is dy is a col vector, i.e. dy = (dL/dy).T
         x, w, b = self.saved_tensors
-        # print('x.shape = ', x.shape)
-        # print('w.shape = ', w.shape)
-        # print('b.shape = ', b.shape)
-
-        if SQUEEZE_OUT_BATCH:  # for now, squeeze out the batch dim
-            # TODO: remove this one we properly support batches.
-            dy = dy.squeeze(0)
-            x = x.squeeze(0)
-            # w and b have no batch dimensions.
-            # however dx will have a batch dimension (must match the shape of the original x).
-
-        # Make sure that row vectors are row vectors (leading 1 in shape)
-        # and column vectors are column vectors (trailing 1 in shape)
-        if 0:
-            if x.shape[-1] != 1 and len(x.shape) < 3:  # should be a col vector
-                # if we have less than a 3 tensor, and the last dim is not 1 not a true column vector
-                x = x.unsqueeze(-1)
-            if dy.shape[-1] != 1:  # should be a col vector, i.e. same shape as y.
-                dy = dy.unsqueeze(-1)
 
         dx = dw = db = None
         if self.k <= 0:  # baseline, exact MatMul instead of CRS.
             if self.needs_input_grad[1]:  # w
-                # x.shape (batch_size, in_features)
-                # x is a column vector (last dim 1) --  should be (batch_size, in_features, 1)
-                # current x.shape has no column vector shape at the end. Why?
-                # dy.shape (1, out_features)
-                # should dy have a leading batch dimension??? i.e. dy.shape (batch_size, 1, out_features)?
-                # dw.T.shape = w.shape = (out_features, in_features)
-
-                # Once the shapes are: x = (batch_size, in_features, 1), dy = (batch_size, 1, out_features)
-                # then use torch.bmm(x, dy), which has shape (batch_size, in_features, out_features)
-                # then average over the batch dimension for dw (Confirm this...)
-                # TODO: How do we average over the batch dimension implicitly with matmul? Figure out the math.
-                # TODO: Is the averaging over the batch dimension an explicit operation, or is it done
-                # implicitly in the math?
                 dw = dy.T @ x
                 assert dw.shape == w.shape
 
             if self.needs_input_grad[0]:  # x
                 dx = dy @ w
-                # equiv. to dx = w.T @ dy
-                assert dx.shape == x.shape  # We actually need to match the shape of the original x.
-                # print('computed dx.shape', dx.shape)
-                if SQUEEZE_OUT_BATCH:
-                    # unsqueeze out the batch
-                    dx = dx.unsqueeze(0)
-                    # To be technically exactly the same shape, squeeze out the col vector part
-                    dx = dx.squeeze(-1)
-                    # print('final dx.shape', dx.shape)
+                assert dx.shape == x.shape
 
             if self.needs_input_grad[2]:  # b
                 # TODO: work out the formula for this.
@@ -375,8 +317,6 @@ class linear_crs(Function):
         # TODO: figure out where scaling fits in with
         # the gradients. For now assume no scaling, which is usually preferred.
         indexes, scaling = self.indexes_scaling
-
-        # Idea. Just use their backward() impl. but use my saved indicies.
 
         if self.needs_input_grad[1]:
             partial_dw = x[indexes] @ dy.T
@@ -438,13 +378,13 @@ def test_linear_crs_fw(k=50):
 
         norm = torch.norm(D)
         norm_diff = torch.norm(C - D)
-        norm_diff_ratio = norm_diff / (exact_norm * norm)  # Error metric in [1]
+        norm_diff_ratio = norm_diff / (torch.norm(A) * torch.norm(B))  # Error metric in [1]
 
         print('Approximate Result (k={}, strategy={}):'.format(k, strategy))
         print('D ~= A @ B =\n', D)
         print('|D| =', norm)
         print('|C - D| =', norm_diff)
-        print('(|C - D|) / (|C| |D|) =', norm_diff_ratio)
+        print('(|C - D|) / (|A| |B|) =', norm_diff_ratio)
 
 
 def test_linear_crs_fw_bw(k=50):
@@ -464,13 +404,13 @@ def test_linear_crs_fw_bw(k=50):
 
         norm = torch.norm(D)
         norm_diff = torch.norm(C - D)
-        norm_diff_ratio = norm_diff / (exact_norm * norm)  # Error metric in [1]
+        norm_diff_ratio = norm_diff / (torch.norm(A) * torch.norm(B))  # Error metric in [1]
 
         print('Approximate Result (k={}, strategy={}):'.format(k, strategy))
         print('D ~= A @ B =\n', D)
         print('|D| =', norm)
         print('|C - D| =', norm_diff)
-        print('(|C - D|) / (|C| |D|) =', norm_diff_ratio)
+        print('(|C - D|) / (|A| |B|) =', norm_diff_ratio)
 
 
 def main():
