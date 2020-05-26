@@ -101,9 +101,9 @@ class TestGroup(object):
         Record the time and loss
         '''
         model.train()
-        ftime = 0
-        btime = 0
-        utime = 0
+        ftime = []
+        btime = []
+        utime = []
         tloss = 0
         for bid, (data, target) in enumerate(self.trainloader):
             data, target = Variable(data).cuda(), Variable(
@@ -115,26 +115,26 @@ class TestGroup(object):
             opt.zero_grad()
             end.record()
             end.synchronize()
-            utime += start.elapsed_time(end)
+            # utime.append(start.elapsed_time(end))
 
             start.record()
             output = model(data)
             loss = F.nll_loss(output, target)
             end.record()
             end.synchronize()
-            ftime += start.elapsed_time(end)
+            ftime.append(start.elapsed_time(end))  # time for forward propogation
 
             start.record()
             loss.backward()
             end.record()
             end.synchronize()
-            btime += start.elapsed_time(end)
+            btime.append(start.elapsed_time(end))  # time for backward propogation
 
             start.record()
             opt.step()
             end.record()
             end.synchronize()
-            utime += start.elapsed_time(end)
+            utime.append(start.elapsed_time(end))  # time to step optimizer/apply weight updates
 
             tloss += loss.data.item()
         tloss /= len(self.trainloader)
@@ -218,21 +218,26 @@ class TestGroup(object):
 
             times.append(ttime)
             losses.append(loss)
-            ftime.append(ft)
-            btime.append(bt)
-            utime.append(ut)
+            ftime += ft
+            btime += bt
+            utime += ut
             # predict
             curacc = self._evaluate(model, self.devloader, 'dev')
             if curacc > acc:  # only eval on test set if dev accuracy has improved.
                 e = t
                 acc = curacc
                 accc = self._evaluate(model, self.testloader, '    test')
-        etime = [sum(t) for t in zip(ftime, btime, utime)]
+        etime = [sum(t) for t in zip(ftime, btime, utime)]  # overall execution time
         print('Best performance (by dev_acc):')
         print(
             'dev_acc={:.2f} | test_acc={:.2f} at epoch={}'.format(acc, accc, e),
             file=self.file,
             flush=True)
+        means_stds = [(torch.mean(times), torch.std(times)) for times in map(torch.tensor, (ftime, btime, utime))]
+        # print('mean__std\nfwd_time:{:.4f}__{:.4f}\tbw_time:{:.4f}__{:.4f}\tstep_time:{:.4f}__{:.4f}'.format(
+        #     *means_stds[0], *means_stds[1], *means_stds[2]))
+        print('(mean,std)  fwd_time, bw_time, step_time\n{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}'.format(
+            *means_stds[0], *means_stds[1], *means_stds[2]))
         print('', file=self.file)
 
     def _stat(self, name, t, agg=mean):
