@@ -167,7 +167,7 @@ class linear_crs(Function):
         w should be of size [input feature, output feature] (e.g. weight matrix)
         bias should be of size [output feature] (will be broadcasted across batch dimension).
 
-        returns (w @ x) + b
+        return x @ w.T + b
         
         This is slightly different from the default linear function in PyTorch.
         In that implementation, w is of size [output feature, input feature].
@@ -185,107 +185,10 @@ class linear_crs(Function):
             result = x @ w.T + b
             return result
 
-        B = x
-        A = w
-        k = self.k
-        strategy = self.strategy
-        # In the batched case, A.shape = (out_features, in_features), B.shape = (batch_size, in_features)
-        # What matmul operation to support this case? How can I specify broadcasting over the (implict) batch dim?
-        # Should I do A.unsqueeze(0) to get a leading 1, and do a matmul to broadcast over that?
-        assert A.shape[1] == B.shape[0]
-        common_dimension = A.shape[1]
-        assert common_dimension >= k
-
-        if strategy == 'random':
-            # Random Sampling (w/o replacement)
-            # indexes = np.random.choice(common_dimension, size=k, replace=False)
-            indexes = torch.randperm(common_dimension)[:k]
-            indexes, inds = torch.sort(indexes)
-            # Scale by 1 / (k*p_i)  # Eq. 1 in [1]
-            scaling = 1 / (k * 1/common_dimension)
-        elif strategy == 'det_top_k':
-            # Deterministic top-k
-            # Compute norms of all cols of A
-            col_norms_A = torch.norm(A, dim=0)  # TODO VERIFY: dim=0 for cols.
-            # Compute norms of all rows of B
-            row_norms_B = torch.norm(B, dim=1)  # TODO VERIFY: dim=1 for rows.
-            assert col_norms_A.shape == row_norms_B.shape
-
-            # Compute norm-products of all corresponding col-row pairs (not all pairs!)
-            norm_products = col_norms_A * row_norms_B
-            assert norm_products.shape == col_norms_A.shape
-
-            # Pick the indexes of the largest norm-products
-            # np.argpartition(arr, k) returns the indexes of the k smallest elements in arr followed by other unsorted indexes.
-            # Take the last k of these values to get the indexes of the largest values.
-            # Ref: https://stackoverflow.com/questions/6910641/how-do-i-get-indices-of-n-maximum-values-in-a-numpy-array
-            # indexes = np.argpartition(norm_products, -k)[-k:]
-            _, indexes = torch.topk(norm_products, k)
-            indexes, inds = torch.sort(indexes)
-
-            # "In addition, we introduce a deterministic top-k sampling, which chooses the k column-row pairs
-            # with the largest product of their euclidean norms without scaling." [1]
-            scaling = None
-        elif strategy == 'nps':
-            # Norm-Proportional Sampling w/o replacement
-            # Compute a probability distribution over column-row pairs, according to Eq. 3 from [1].
-            # p_i = |A[:, i]| * |B[i, :]| / summation_j [|A[:, j]| * |B[j, :]|]
-
-            # Compute norms of all cols of A
-            col_norms_A = torch.norm(A, dim=0)  # TODO VERIFY: dim=0 for cols.
-            # Compute norms of all rows of B
-            row_norms_B = torch.norm(B, dim=1)  # TODO VERIFY: dim=1 for rows.
-            assert col_norms_A.shape == row_norms_B.shape
-
-            # Compute norm-products of all corresponding col-row pairs (not all pairs!)
-            norm_products = col_norms_A * row_norms_B
-            assert norm_products.shape == col_norms_A.shape
-
-            # Normalize by sum of norm products.
-            p_i = norm_products / torch.sum(norm_products)
-            assert p_i.shape == (common_dimension,)
-
-            # select k random samples w/o replacement, from the distribution p_i, from the set of col-row pairs.
-            # indexes = np.random.choice(common_dimension, size=k, replace=False, p=p_i)
-            indexes = torch.multinomial(p_i, num_samples=k, replacement=False)
-            indexes, inds = torch.sort(indexes)
-            assert indexes.shape == (k,)
-
-            # "when one matrix or both have i.i.d. entries with zero mean, random individual column-row
-            # products are unbiased estimators of the result. In this case, multiplying by the scaling
-            # factor 1 / (k*p_{i_t}) only increases the error" [1]
-            # TL;DR -- No scaling is better.
-            scaling = None
-            # TODO implement scaling, just for comparison...
-            if 0:  # scaling seems to improve error metric...
-                scaling = 1 / (k * p_i)
-                scaling = torch.diag(scaling[indexes])
-        else:
-            raise NotImplementedError
-
-        # Select `indexes` cols from A and `indexes` rows from B
-        assert indexes.shape == (k,)
-        cols_A = A[:, indexes]
-        rows_B = B[indexes, :]
-        assert cols_A.shape[0] == A.shape[0]
-        assert rows_B.shape[1] == B.shape[1]
-        assert cols_A.shape[1] == rows_B.shape[0]
-
-        if scaling is not None:
-            if strategy == 'nps':
-                D = cols_A @ scaling @ rows_B  # Eq. 3 from [1]
-            else:
-                D = cols_A @ rows_B * scaling
-        else:
-            # Simply take outer product of cols_A and rows_B
-            D = cols_A @ rows_B
-
-        # What exactly do we need to save for backward???
-        # self.save_for_backward(x, w, b)  # moved to top and it started working...
+        D, indexes, scaling = crs_mm(x, w.T, self.k, strategy=self.strategy)
         self.indexes_scaling = indexes, scaling
 
-        # return D + b
-        return D
+        return D + b
 
 
     def backward(self, dy):
@@ -309,7 +212,7 @@ class linear_crs(Function):
 
             if self.needs_input_grad[2]:  # b
                 # TODO: work out the formula for this.
-                db = torch.zeros_like(b)
+                db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
                 assert db.shape == b.shape
 
             return dx, dw, db
@@ -318,30 +221,22 @@ class linear_crs(Function):
         # the gradients. For now assume no scaling, which is usually preferred.
         indexes, scaling = self.indexes_scaling
 
-        if self.needs_input_grad[1]:
-            partial_dw = x[indexes] @ dy.T
-            full_dw = torch.zeros_like(w.T)
-            # TODO: need to be very careful in copying... which axes, indexes are rows or cols
-            #   given the shape of partial_dw...
-            full_dw.index_copy_(0, indexes, partial_dw)
-
-            dw = full_dw.T  # need to make dw in the same shape of w.
+        if self.needs_input_grad[1]:  # w
+            partial_dw = dy.T @ x[:, indexes]
+            dw = torch.zeros_like(w)
+            dw[:, indexes] = partial_dw  # alternative to scatter_ or index_copy_
             assert dw.shape == w.shape
 
-        if self.needs_input_grad[0]:
-            # using denom. convention. partial_dx has only populated entries of dx. dx has shape x.shape
-            partial_dx = w[:, indexes].T @ dy
-            print('w[:, indexes].shape', w[:, indexes].shape, '\nw[:, indexes].T.shape', w[:, indexes].T.shape)
-            full_dx = torch.zeros_like(x)
-            full_dx.index_copy_(0, indexes, partial_dx)
-            dx = full_dx
-            # dx = w.T @ dy
+        if self.needs_input_grad[0]:  # x
+            partial_dx = dy @ w[:, indexes]
+            dx = torch.zeros_like(x)
+            dx[:, indexes] = partial_dx
             assert dx.shape == x.shape
 
-        if self.needs_input_grad[2]:
+        if self.needs_input_grad[2]:  # b
             # TODO: what is the right formula for this?
-            # db = dy.T @ torch.ones(dy.shape, b.shape[0])
-            db = torch.zeros_like(b)
+            # bias with batches???
+            db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
             assert db.shape == b.shape
 
         # Why is their formula still different/backwards than ours?
@@ -365,7 +260,107 @@ class linear_crs(Function):
         return dx, dw, db
 
 
+def crs_mm(A, B, k, strategy='random'):
+    """ Returns A @ B, computed using `k` outer products.
+    `k` <= A.shape[1] == B.shape[0]
+    `strategy` in ('random', 'det_top_k', 'nps')
+    """
+
+    assert A.shape[1] == B.shape[0]
+    common_dimension = A.shape[1]
+    assert common_dimension >= k
+
+    if strategy == 'random':
+        # Random Sampling (w/o replacement)
+        # indexes = np.random.choice(common_dimension, size=k, replace=False)
+        indexes = torch.randperm(common_dimension)[:k]
+        indexes, inds = torch.sort(indexes)
+        # Scale by 1 / (k*p_i)  # Eq. 1 in [1]
+        scaling = 1 / (k * 1/common_dimension)
+    elif strategy == 'det_top_k':
+        # Deterministic top-k
+        # Compute norms of all cols of A
+        col_norms_A = torch.norm(A, dim=0)  # TODO VERIFY: dim=0 for cols.
+        # Compute norms of all rows of B
+        row_norms_B = torch.norm(B, dim=1)  # TODO VERIFY: dim=1 for rows.
+        assert col_norms_A.shape == row_norms_B.shape
+
+        # Compute norm-products of all corresponding col-row pairs (not all pairs!)
+        norm_products = col_norms_A * row_norms_B
+        assert norm_products.shape == col_norms_A.shape
+
+        # Pick the indexes of the largest norm-products
+        # np.argpartition(arr, k) returns the indexes of the k smallest elements in arr followed by other unsorted indexes.
+        # Take the last k of these values to get the indexes of the largest values.
+        # Ref: https://stackoverflow.com/questions/6910641/how-do-i-get-indices-of-n-maximum-values-in-a-numpy-array
+        # indexes = np.argpartition(norm_products, -k)[-k:]
+        _, indexes = torch.topk(norm_products, k)
+        indexes, inds = torch.sort(indexes)
+
+        # "In addition, we introduce a deterministic top-k sampling, which chooses the k column-row pairs
+        # with the largest product of their euclidean norms without scaling." [1]
+        scaling = None
+    elif strategy == 'nps':
+        # Norm-Proportional Sampling w/o replacement
+        # Compute a probability distribution over column-row pairs, according to Eq. 3 from [1].
+        # p_i = |A[:, i]| * |B[i, :]| / summation_j [|A[:, j]| * |B[j, :]|]
+
+        # Compute norms of all cols of A
+        col_norms_A = torch.norm(A, dim=0)  # TODO VERIFY: dim=0 for cols.
+        # Compute norms of all rows of B
+        row_norms_B = torch.norm(B, dim=1)  # TODO VERIFY: dim=1 for rows.
+        assert col_norms_A.shape == row_norms_B.shape
+
+        # Compute norm-products of all corresponding col-row pairs (not all pairs!)
+        norm_products = col_norms_A * row_norms_B
+        assert norm_products.shape == col_norms_A.shape
+
+        # Normalize by sum of norm products.
+        p_i = norm_products / torch.sum(norm_products)
+        assert p_i.shape == (common_dimension,)
+
+        # select k random samples w/o replacement, from the distribution p_i, from the set of col-row pairs.
+        # indexes = np.random.choice(common_dimension, size=k, replace=False, p=p_i)
+        indexes = torch.multinomial(p_i, num_samples=k, replacement=False)
+        indexes, inds = torch.sort(indexes)
+        assert indexes.shape == (k,)
+
+        # "when one matrix or both have i.i.d. entries with zero mean, random individual column-row
+        # products are unbiased estimators of the result. In this case, multiplying by the scaling
+        # factor 1 / (k*p_{i_t}) only increases the error" [1]
+        # TL;DR -- No scaling is better.
+        scaling = None
+        # TODO implement scaling, just for comparison...
+        if 0:  # scaling seems to improve error metric...
+            scaling = 1 / (k * p_i)
+            scaling = torch.diag(scaling[indexes])
+    else:
+        raise NotImplementedError
+
+    # Select `indexes` cols from A and `indexes` rows from B
+    assert indexes.shape == (k,)
+    cols_A = A[:, indexes]
+    rows_B = B[indexes, :]
+    assert cols_A.shape[0] == A.shape[0]
+    assert rows_B.shape[1] == B.shape[1]
+    assert cols_A.shape[1] == rows_B.shape[0]
+
+    if scaling is not None:
+        if strategy == 'nps':
+            D = cols_A @ scaling @ rows_B  # Eq. 3 from [1]
+        else:
+            D = cols_A @ rows_B * scaling
+    else:
+        # Simply take outer product of cols_A and rows_B
+        D = cols_A @ rows_B
+
+    return D, indexes, scaling
+
+
 def test_linear_crs_fw(k=50):
+    # TODO remove this test in favor of `test_linear_crs_fw_diffsize`.
+    print('START test_linear_crs_fw')
+    print('WARNING: DEPRECATED TEST')
     A = torch.rand(1000, 1000)
     B = torch.rand(1000, 1000) + 1
     bias = torch.zeros(1000, 1)
@@ -385,22 +380,22 @@ def test_linear_crs_fw(k=50):
         print('|D| =', norm)
         print('|C - D| =', norm_diff)
         print('(|C - D|) / (|A| |B|) =', norm_diff_ratio)
+    print('END test_linear_crs_fw')
 
 
-def test_linear_crs_fw_bw(k=50):
-    A = torch.rand(1000, 500, requires_grad=True)  # output_features, input_features
-    B = torch.rand(500, 200, requires_grad=True) + 1  # input_features, batch_size
-    bias = torch.zeros(1000, 1, requires_grad=True)  # output_features, broadcasted across batch_size
+def test_linear_crs_fw_diffsize(k=50):
+    print('START test_linear_crs_fw_diffsize')
+    A = torch.rand(1000, 500)  # output_features, input_features -- weight matrix
+    B = torch.rand(200, 500) + 1  # batch_size, input_features -- input matrix
+    # batch size as leading dim (pytorch convetion)
+    bias = torch.zeros(1000)  # output_features, implicitly broadcasted across batch_size
 
-    C = A @ B + bias
+    C = B @ A.T + bias
     exact_norm = torch.norm(C)
-    resultsum = torch.sum(C)
-    resultsum.backward()
 
     for strategy in ('random', 'det_top_k', 'nps'):
         D = linear_crs(k=k, strategy=strategy)(B, A, bias)  # x=B, w=A, bias=bias
-        dy = torch.ones_like(D)
-        outputs = D.backward(dy)
+        # returns B @ A.T + bias
 
         norm = torch.norm(D)
         norm_diff = torch.norm(C - D)
@@ -411,10 +406,43 @@ def test_linear_crs_fw_bw(k=50):
         print('|D| =', norm)
         print('|C - D| =', norm_diff)
         print('(|C - D|) / (|A| |B|) =', norm_diff_ratio)
+    print('END test_linear_crs_fw_diffsize')
+
+
+def test_linear_crs_fw_bw(k=50):
+    print('START test_linear_crs_fw_bw')
+    A = torch.rand(1000, 500, requires_grad=True)  # output_features, input_features
+    B = torch.rand(200, 500, requires_grad=True)  # batch_size, input_features -- input matrix
+    bias = torch.zeros(1000, requires_grad=True)  # output_features, broadcasted across batch_size
+
+    C = B @ A.T + bias
+    exact_norm = torch.norm(C)
+    resultsum = torch.sum(C)
+    resultsum.backward()
+    print('A.grad.shape =', A.grad.shape, '\nB.grad.shape =', B.grad.shape, '\nbias.grad.shape =', bias.grad.shape)
+
+    for strategy in ('random', 'det_top_k', 'nps'):
+        D = linear_crs(k=k, strategy=strategy)(B, A, bias)  # x=B, w=A, bias=bias
+        dy = torch.ones_like(D)
+        outputs = D.backward(dy)
+        print('A.grad.shape =', A.grad.shape, '\nB.grad.shape =',
+            B.grad.shape, '\nbias.grad.shape =', bias.grad.shape)
+
+        norm = torch.norm(D)
+        norm_diff = torch.norm(C - D)
+        norm_diff_ratio = norm_diff / (torch.norm(A) * torch.norm(B))  # Error metric in [1]
+
+        print('Approximate Result (k={}, strategy={}):'.format(k, strategy))
+        print('D ~= A @ B =\n', D)
+        print('|D| =', norm)
+        print('|C - D| =', norm_diff)
+        print('(|C - D|) / (|A| |B|) =', norm_diff_ratio)
+    print('END test_linear_crs_fw_bw')
 
 
 def main():
     test_linear_crs_fw()
+    test_linear_crs_fw_diffsize()
     test_linear_crs_fw_bw()
 
 
