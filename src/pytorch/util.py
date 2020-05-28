@@ -47,6 +47,7 @@ class TestGroup(object):
         self.strategy = strategy
 
         if cudatensor:  # dataset is on GPU
+            print('dataset is on GPU, num_workers=0')
             self.trainloader = torch.utils.data.DataLoader(
                 trnset, batch_size=mb, num_workers=0)
             if tstset:
@@ -54,19 +55,25 @@ class TestGroup(object):
                     tstset, batch_size=mb, num_workers=0)
             else:
                 self.testloader = None
+            if devset:
+                self.devloader = torch.utils.data.DataLoader(
+                    devset, batch_size=mb, num_workers=0)
+            else:
+                self.devloader = None
         else:  # dataset is on CPU, using prefetch and pinned memory to shorten the data transfer time
+            print('dataset is on CPU, num_workers=1')
             self.trainloader = torch.utils.data.DataLoader(
                 trnset,
                 batch_size=mb,
                 shuffle=True,
-                num_workers=1,
+                num_workers=0,
                 pin_memory=True)
             if devset:
                 self.devloader = torch.utils.data.DataLoader(
                     devset,
                     batch_size=mb,
                     shuffle=False,
-                    num_workers=1,
+                    num_workers=0,
                     pin_memory=True)
             else:
                 self.devloader = None
@@ -75,7 +82,7 @@ class TestGroup(object):
                     tstset,
                     batch_size=mb,
                     shuffle=False,
-                    num_workers=1,
+                    num_workers=0,
                     pin_memory=True)
             else:
                 self.testloader = None
@@ -92,7 +99,7 @@ class TestGroup(object):
             self.trnset,
             batch_size=self.mb,
             shuffle=True,
-            num_workers=1,
+            num_workers=0,
             pin_memory=True)
 
     def _train(self, model, opt):
@@ -105,6 +112,7 @@ class TestGroup(object):
         btime = []
         utime = []
         tloss = 0
+        # import pdb; pdb.set_trace()
         for bid, (data, target) in enumerate(self.trainloader):
             data, target = Variable(data).cuda(), Variable(
                 target.view(-1)).cuda()
