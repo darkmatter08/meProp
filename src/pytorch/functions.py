@@ -94,7 +94,7 @@ class linear(Function):
         x should be of size [minibatch, input feature]
         w should be of size [input feature, output feature]
         b should be of size [output feature]
-        
+
         This is slightly different from the default linear function in PyTorch.
         In that implementation, w is of size [output feature, input feature].
         We find that that implementation is slower in both forward and backward propagation on our devices.
@@ -146,9 +146,92 @@ class linear(Function):
         return dx, dw, db
 
 
+class linearUnified_shawn(Function):
+    '''
+    Shawn's implementation of
+    linear function with meProp, unified top-k across minibatch
+    y = f(x, w, b) = xw + b
+    '''
+
+    def __init__(self, k):
+        '''
+        k is top-k in the backprop of meprop
+        '''
+        super(linearUnified_shawn, self).__init__()
+        self.k = k
+
+    def forward(self, x, w, b):
+        '''
+        Forward propagation with Column Row Sampling
+        x should be of size [minibatch, input feature] (e.g. input vector)
+        w should be of size [input feature, output feature] (e.g. weight matrix)
+        bias should be of size [output feature] (will be broadcasted across batch dimension).
+
+        return x @ w.T + b
+
+        This is slightly different from the default linear function in PyTorch.
+        In that implementation, w is of size [output feature, input feature].
+        We find that that implementation is slower in both forward and backward propagation on our devices.
+        '''
+        self.save_for_backward(x, w, b)
+
+        result = x @ w.T + b
+        # result = torch.addmm(b, x, w.T)  # Faster alternative.
+        return result
+
+    def backward(self, dy):
+        '''
+        backward() with CRS sampling
+        The sampling "mask" is saved from forward().
+        TODO: What about multiple calls to forward()? How does gradient accum work with forward?
+        '''
+        # PyTorch convention is dy is a col vector, i.e. dy = (dL/dy).T
+        x, w, b = self.saved_tensors
+
+        dx = dw = db = None
+        if self.k <= 0 or dy.shape[1] <= self.k:  # exact backprop, no top-k selection
+            if self.needs_input_grad[1]:  # w
+                dw = dy.T @ x
+                assert dw.shape == w.shape
+
+            if self.needs_input_grad[0]:  # x
+                dx = dy @ w
+                assert dx.shape == x.shape
+
+            if self.needs_input_grad[2]:  # b
+                # TODO: work out the formula for this.
+                db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
+                assert db.shape == b.shape
+
+            return dx, dw, db
+
+        else:  # Do the top-k selection
+            # get top-k across examples in magnitude
+            _, indexes = dy.abs().sum(0).topk(self.k)  # .topk applies to which dim? last dim only?
+
+            if self.needs_input_grad[1]:  # w
+                partial_dw = dy.T[indexes, :] @ x
+                dw = torch.zeros_like(w)
+                # alternative to scatter_ or index_copy_
+                dw[indexes, :] = partial_dw
+                assert dw.shape == w.shape
+
+            if self.needs_input_grad[0]:  # x
+                dx = dy[:, indexes] @ w[indexes, :]
+                assert dx.shape == x.shape
+
+            if self.needs_input_grad[2]:  # b
+                # TODO: what is the right formula for this?
+                # bias with batches???
+                db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
+                assert db.shape == b.shape
+
+        return dx, dw, db
+
+
 class linear_crs(Function):
     '''
-    linear function with meProp, top-k selection with respect to each example in minibatch
+    linear function CRS sampling in forward().
     y = f(x, w, b) = xw + b
     '''
 
@@ -168,7 +251,7 @@ class linear_crs(Function):
         bias should be of size [output feature] (will be broadcasted across batch dimension).
 
         return x @ w.T + b
-        
+
         This is slightly different from the default linear function in PyTorch.
         In that implementation, w is of size [output feature, input feature].
         We find that that implementation is slower in both forward and backward propagation on our devices.
@@ -440,11 +523,51 @@ def test_linear_crs_fw_bw(k=50):
     print('END test_linear_crs_fw_bw')
 
 
-def main():
-    test_linear_crs_fw()
-    test_linear_crs_fw_diffsize()
-    test_linear_crs_fw_bw()
+def test_linearUnified_shawn(k=50):
+    print('START test_linearUnified_shawn')
+    # output_features, input_features
+    A = torch.rand(1000, 500, requires_grad=True)
+    # batch_size, input_features -- input matrix
+    B = torch.rand(200, 500, requires_grad=True)
+    # output_features, broadcasted across batch_size
+    bias = torch.zeros(1000, requires_grad=True)
 
+    C = B @ A.T + bias
+    exact_norm = torch.norm(C)
+    resultsum = torch.sum(C)
+    resultsum.backward()
+    print('A.grad.shape =', A.grad.shape, '\nB.grad.shape =',
+          B.grad.shape, '\nbias.grad.shape =', bias.grad.shape)
+
+    for strategy in ('random', 'det_top_k', 'nps'):
+        D = linearUnified_shawn(k=k)(
+            B, A, bias)  # x=B, w=A, bias=bias
+        dy = torch.ones_like(D)
+        outputs = D.backward(dy)
+        print('A.grad.shape =', A.grad.shape, '\nB.grad.shape =',
+              B.grad.shape, '\nbias.grad.shape =', bias.grad.shape)
+
+        norm = torch.norm(D)
+        norm_diff = torch.norm(C - D)
+        norm_diff_ratio = norm_diff / \
+            (torch.norm(A) * torch.norm(B))  # Error metric in [1]
+
+        print('Approximate Result (k={}, strategy={}):'.format(k, strategy))
+        print('D ~= A @ B =\n', D)
+        print('|D| =', norm)
+        print('|C - D| =', norm_diff)
+        print('(|C - D|) / (|A| |B|) =', norm_diff_ratio)
+    print('END test_linearUnified_shawn')
+
+
+
+def main():
+    if 0:
+        test_linear_crs_fw()
+        test_linear_crs_fw_diffsize()
+        test_linear_crs_fw_bw()
+    if 1:
+        test_linearUnified_shawn()
 
 if __name__ == '__main__':
     main()
