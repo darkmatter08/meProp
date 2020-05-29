@@ -34,7 +34,8 @@ class TestGroup(object):
                  cudatensor=False,
                  file=sys.stdout,
                  crs=False,
-                 strategy=None):
+                 strategy=None,
+                 shawnunified=False):
         self.args = args
         self.mb = mb  # mini-batch size
         self.hidden = hidden  # hidden dimension
@@ -45,6 +46,7 @@ class TestGroup(object):
         self.unified = unified  # unified -- refers to how batching is implemented
         self.crs = crs
         self.strategy = strategy
+        self.shawnunified = shawnunified
 
         if cudatensor:  # dataset is on GPU
             print('dataset is on GPU, num_workers=0')
@@ -61,7 +63,7 @@ class TestGroup(object):
             else:
                 self.devloader = None
         else:  # dataset is on CPU, using prefetch and pinned memory to shorten the data transfer time
-            print('dataset is on CPU, num_workers=1')
+            print('dataset is on CPU, num_workers=0')
             self.trainloader = torch.utils.data.DataLoader(
                 trnset,
                 batch_size=mb,
@@ -192,7 +194,7 @@ class TestGroup(object):
         self.reset()
 
         model = NetLayer(self.hidden, k, self.layer, self.dropout,
-                         self.unified, crs=self.crs, strategy=self.strategy)
+                         self.unified, crs=self.crs, strategy=self.strategy, shawnunified=self.shawnunified)
         print('==='*10)
         print('model:')
         print(model)

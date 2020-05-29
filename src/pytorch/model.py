@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from modules import Linear, LinearCRS
+from modules import Linear, LinearCRS, LinearShawn
 
 
 class NetLayer(nn.Module):
@@ -22,14 +22,17 @@ class NetLayer(nn.Module):
     Activation is ReLU
     '''
 
-    def __init__(self, hidden, k, layer, dropout=None, unified=False, crs=False, strategy=None):
+    def __init__(self, hidden, k, layer, dropout=None, unified=False, crs=False, strategy=None, shawnunified=False):
         # layer: number of layers in this network.
         super(NetLayer, self).__init__()
         self.k = k
         self.layer = layer
         self.dropout = dropout
         self.unified = unified
+        self.shawnunified = shawnunified
         self.crs = crs
+        if unified and shawnunified:
+            print('invalid arguments, unified and shawnunified both True.')
         if crs:
             assert strategy in ('random', 'det_top_k', 'nps')
             # ignore value of 'unified'
@@ -44,19 +47,26 @@ class NetLayer(nn.Module):
             if i == 0:  # input layer case
                 if self.crs:
                     d['linearCRS' + str(i)] = LinearCRS(784, hidden, k, strategy=self.strategy)
+                elif self.shawnunified:
+                    d['linearUnified_shawn' +str(i)] = LinearShawn(784, hidden, k)
                 else:
-                    d['linear' + str(i)] = Linear(784, hidden, k, self.unified)
+                    # d['linear' + str(i)] = Linear(784, hidden, k, unified=self.unified, shawnunified=self.shawnunified)
+                    d['linear' + str(i)] = Linear(784, hidden, k, unified=self.unified)
                 d['relu' + str(i)] = nn.ReLU()
                 if dropout:
                     d['dropout' + str(i)] = nn.Dropout(p=dropout)
             elif i == layer - 1:  # final layer/readout layer.
                 # Do not put CRS in the final readout layer...
-                d['linear' + str(i)] = Linear(hidden, 10, 0, self.unified)
+                # d['linear' + str(i)] = Linear(hidden, 10, 0, unified=self.unified, shawnunified=self.shawnunified)
+                d['linear' + str(i)] = Linear(hidden, 10, 0, unified=self.unified)
             else:  # standard middle layer
                 if self.crs:
                     d['linearCRS' + str(i)] = LinearCRS(hidden, hidden, k, strategy=self.strategy)
+                elif self.shawnunified:
+                    d['linearUnified_shawn' + str(i)] = LinearShawn(hidden, hidden, k)
                 else:
-                    d['linear' + str(i)] = Linear(hidden, hidden, k, self.unified)
+                    # d['linear' + str(i)] = Linear(hidden, hidden, k, unified=self.unified, shawnunified=self.shawnunified)
+                    d['linear' + str(i)] = Linear(hidden, hidden, k, unified=self.unified)
                 d['relu' + str(i)] = nn.ReLU()
                 if dropout:
                     d['dropout' + str(i)] = nn.Dropout(p=dropout)

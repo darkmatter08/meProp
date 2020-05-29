@@ -46,6 +46,12 @@ def get_args():
         help='do not use unified meProp')
     parser.add_argument(
         '--random_seed', type=int, default=12976, help='random seed')
+    parser.add_argument(
+        '--profile',
+        action='store_true',
+        default=False,
+        help='do GPU profiling of the code')
+    parser.set_defaults(unified=False)
     parser.set_defaults(unified=False)
     return parser.parse_args()
 
@@ -83,6 +89,8 @@ def get_args_unified():
         help='do not use unified meProp')
     parser.add_argument(
         '--random_seed', type=int, default=12976, help='random seed')
+    parser.add_argument('--shawnunified', action='store_true',
+        help='shawn`s impl of unified meProp', default=False)
     parser.set_defaults(unified=True)
     return parser.parse_args()
 
@@ -144,7 +152,18 @@ def main():
         file=sys.stdout)
 
     # results may be different at each run
-    group.run(0, args.n_epoch)
+    if args.profile:
+        print('profiling...')
+        with torch.autograd.profiler.profile(use_cuda=True) as prof:
+            group.run(0, args.n_epoch)
+        print('profiler result:')
+        print('sort_by="self_cpu_time_total"')
+        print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+        print('sort_by="cuda_time_total"')
+        print(prof.key_averages().table(sort_by="cuda_time_total"))
+    else:
+        group.run(0, args.n_epoch)
+
     # mbsize: 32, hidden size: 512, layer: 3, dropout: 0.1, k: 0
     # 0：dev set: Average loss: 0.1202, Accuracy: 4826/5000 (96.52%)
     #     test set: Average loss: 0.1272, Accuracy: 9616/10000 (96.16%)
@@ -175,7 +194,18 @@ def main():
     #     test set: Average loss: 0.1167, Accuracy: 9800/10000 (98.00%)
     # 19：dev set: Average loss: 0.1490, Accuracy: 4910/5000 (98.20%)
     # $98.52|98.00 at 18
-    group.run(args.k, args.n_epoch)
+    if args.profile:
+        print('profiling...')
+        with torch.autograd.profiler.profile(use_cuda=True) as prof:
+            group.run(args.k, args.n_epoch)
+        print('profiler result:')
+        print('sort_by="self_cpu_time_total"')
+        print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+        print('sort_by="cuda_time_total"')
+        print(prof.key_averages().table(sort_by="cuda_time_total"))
+    else:
+        group.run(args.k, args.n_epoch)
+
     # mbsize: 32, hidden size: 512, layer: 3, dropout: 0.1, k: 30
     # 0：dev set: Average loss: 0.3283, Accuracy: 4754/5000 (95.08%)
     #     test set: Average loss: 0.3611, Accuracy: 9480/10000 (94.80%)
@@ -227,11 +257,18 @@ def main_unified():
         args.unified,
         dev,
         tst,
-        file=sys.stdout)
+        file=sys.stdout,
+        shawnunified=args.shawnunified)
 
     # results may be different at each run
     # commented for profiling purposes only.
-    # group.run(0)
+    with torch.autograd.profiler.profile(use_cuda=True) as prof:
+        group.run(0)
+    print('profiler result:')
+    print('sort_by="self_cpu_time_total"')
+    print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+    print('sort_by="cuda_time_total"')
+    print(prof.key_averages().table(sort_by="cuda_time_total"))
 
     # mbsize: 50, hidden size: 500, layer: 3, dropout: 0.1, k: 0
     # 0：dev set: Average loss: 0.1043, Accuracy: 4843/5000 (96.86%)
@@ -326,12 +363,12 @@ def main_crs():
         cudatensor=True,
         )
 
-    # with torch.autograd.profiler.profile(use_cuda=True) as prof:
-    #   group.run(0, args.n_epoch)  # disabled for profiling only...
-    # print('sort_by="self_cpu_time_total"')
-    # print(prof.key_averages().table(sort_by="self_cpu_time_total"))
-    # print('sort_by="cuda_time_total"')
-    # print(prof.key_averages().table(sort_by="cuda_time_total"))
+    with torch.autograd.profiler.profile(use_cuda=True) as prof:
+      group.run(0, args.n_epoch)  # disabled for profiling only...
+    print('sort_by="self_cpu_time_total"')
+    print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+    print('sort_by="cuda_time_total"')
+    print(prof.key_averages().table(sort_by="cuda_time_total"))
 
     print('STARTING k!=0 case...', '==='*10)
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
@@ -339,16 +376,14 @@ def main_crs():
     print('profiler result:')
     print('sort_by="self_cpu_time_total"')
     print(prof.key_averages().table(sort_by="self_cpu_time_total"))
-    print('sort_by="cuda_time_total"')
-    print(prof.key_averages().table(sort_by="cuda_time_total"))
 
 
 if __name__ == '__main__':
     # uncomment to run meprop
-    # main()
+    main()
 
     # run unified meprop
-    main_unified()
+    # main_unified()
 
     # run main_crs()
     # main_crs()
