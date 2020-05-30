@@ -175,8 +175,8 @@ class linearUnified_shawn(Function):
         '''
         self.save_for_backward(x, w, b)
 
-        result = x @ w.T + b
-        # result = torch.addmm(b, x, w.T)  # Faster alternative.
+        # result = x @ w.T + b
+        result = torch.addmm(b, x, w.T)  # Faster alternative.
         return result
 
     def backward(self, dy):
@@ -226,7 +226,6 @@ class linearUnified_shawn(Function):
                 db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
                 assert db.shape == b.shape
 
-
         return dx, dw, db
 
 
@@ -263,10 +262,9 @@ class linear_crs(Function):
         # x.shape, w.shape, b.shape
         # (torch.Size([10, 784]), torch.Size([512, 784]), torch.Size([512]))
 
-        batch_size = x.shape[0]
-
         if self.k <= 0:  # shortcut for baseline case
-            result = x @ w.T + b
+            # result = x @ w.T + b
+            result = torch.addmm(b, x, w.T)
             return result
 
         D, indexes, scaling = crs_mm(x, w.T, self.k, strategy=self.strategy)
