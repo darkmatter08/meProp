@@ -11,6 +11,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
 from torch.autograd import Variable  # TODO move away from Variable.
+import torch.cuda.profiler as profiler
+
 
 from model import NetLayer
 
@@ -114,7 +116,6 @@ class TestGroup(object):
         btime = []
         utime = []
         tloss = 0
-        # import pdb; pdb.set_trace()
         for bid, (data, target) in enumerate(self.trainloader):
             data, target = Variable(data).cuda(), Variable(
                 target.view(-1)).cuda()
@@ -127,6 +128,9 @@ class TestGroup(object):
             end.synchronize()
             # utime.append(start.elapsed_time(end))
 
+            if self.args.profile and bid == 50:  # arbitrary step to profile.
+                print('starting profiling now...')
+                profiler.start()
             start.record()
             output = model(data)
             loss = F.nll_loss(output, target)
@@ -139,6 +143,10 @@ class TestGroup(object):
             end.record()
             end.synchronize()
             btime.append(start.elapsed_time(end))  # time for backward propogation
+            if self.args.profile and bid == 50:  # arbitrary step to profile.
+                profiler.stop()
+                print('ended profiling now...')
+                # NOTE: don't profile stepping.
 
             start.record()
             opt.step()
@@ -208,7 +216,7 @@ class TestGroup(object):
         accc = 0  # test acc. at the time of best dev. acc.
         e = -1  # best dev iteration/epoch
 
-        times = []
+        train_times = []
         losses = []
         ftime = []
         btime = []
@@ -226,7 +234,7 @@ class TestGroup(object):
             end.synchronize()
             ttime = start.elapsed_time(end)
 
-            times.append(ttime)
+            train_times.append(ttime)
             losses.append(loss)
             ftime += ft
             btime += bt
@@ -243,11 +251,10 @@ class TestGroup(object):
             'dev_acc={:.2f} | test_acc={:.2f} at epoch={}'.format(acc, accc, e),
             file=self.file,
             flush=True)
-        means_stds = [(torch.mean(times), torch.std(times)) for times in map(torch.tensor, (ftime, btime, utime))]
-        # print('mean__std\nfwd_time:{:.4f}__{:.4f}\tbw_time:{:.4f}__{:.4f}\tstep_time:{:.4f}__{:.4f}'.format(
-        #     *means_stds[0], *means_stds[1], *means_stds[2]))
-        print('(mean,std)  fwd_time, bw_time, step_time\n{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}'.format(
-            *means_stds[0], *means_stds[1], *means_stds[2]))
+        means_stds = [(torch.sum(times), torch.mean(times), torch.std(times)) for times in map(torch.tensor, (ftime, btime, utime, train_times, etime))]
+        print('(sum,mean,std)  fwd_time, bw_time, step_time, train_times, execution_times\n{:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}' .format(
+            *means_stds[0], *means_stds[1], *means_stds[2], *means_stds[3], *means_stds[4]))
+        print('')
         print('', file=self.file)
 
     def _stat(self, name, t, agg=mean):
