@@ -362,9 +362,11 @@ def crs_mm(A, B, k, strategy='random'):
     elif strategy == 'det_top_k':
         # Deterministic top-k
         # Compute norms of all cols of A
-        col_norms_A = torch.norm(A, dim=0)  # TODO VERIFY: dim=0 for cols.
+        # A.shape = (m,n); torch.norm(A, dim=0).shape = (n)  # i.e. cols
+        # torch.norm(A, dim=1).shape = (m)  # i.e rows
+        col_norms_A = torch.norm(A, dim=0)
         # Compute norms of all rows of B
-        row_norms_B = torch.norm(B, dim=1)  # TODO VERIFY: dim=1 for rows.
+        row_norms_B = torch.norm(B, dim=1)
         assert col_norms_A.shape == row_norms_B.shape
 
         # Compute norm-products of all corresponding col-row pairs (not all pairs!)
