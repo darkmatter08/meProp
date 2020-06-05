@@ -1,0 +1,48 @@
+description: jains-pyprof2__compute_norms
+
+target:
+  cluster: rr1
+  vc: resrchvc # msrlabs
+environment:
+  image: pytorch/pytorch:1.4-cuda10.1-cudnn7-devel
+
+storage:
+  shawn:
+    storage_account_name: hpalangivm0
+    container_name: shawn
+    local_dir: /data/home/jains/shawn
+
+code:
+  local_dir: /data/home/jains/Documents/meProp/src/pytorch
+
+search:
+  job_template:
+    name: jains-pyprof2__compute_norms
+    sku: G1
+    sku_count: 1
+    command:
+    - echo {experiment}
+    - echo $$PT_OUTPUT_DIR
+    - export MYFILENAME=pyprof2__compute_norms_128_mm_small.csv
+    - git clone https://github.com/adityaiitb/pyprof2.git
+    - cd pyprof2
+    - pip install . --user
+    - cd ..
+    - >-
+      nvprof -f -o net.sql --profile-from-start off --
+      python compute_norm.py
+    - cd pyprof2
+    - pyprof2/parse/parse.py ../net.sql > net.dict
+    - pyprof2/prof/prof.py --csv net.dict > $$MYFILENAME
+    - cat $$MYFILENAME
+    - cp $$MYFILENAME /mnt/shawn/.
+    - bash
+    submit_args:
+      container_args:
+        shm_size: 128G
+  type: grid
+  max_trials: 20
+  params:
+    - name: experiment
+      spec: discrete
+      values: ['']
