@@ -30,14 +30,12 @@ class TestGroup(object):
                  hidden,
                  layer,
                  dropout,
-                 unified,
                  devset=None,
                  tstset=None,
                  cudatensor=False,
                  file=sys.stdout,
-                 crs=False,
-                 strategy=None,
-                 shawnunified=False):
+                 layer_type=None,
+                 strategy=None):
         self.args = args
         self.mb = mb  # mini-batch size
         self.hidden = hidden  # hidden dimension
@@ -45,10 +43,14 @@ class TestGroup(object):
         self.dropout = dropout  # dropout rate
         self.file = file  # output file (default=stdout)
         self.trnset = trnset  # training set
+        self.layer_type = layer_type
+        self.strategy = strategy
+        
+        '''
         self.unified = unified  # unified -- refers to how batching is implemented
         self.crs = crs
-        self.strategy = strategy
         self.shawnunified = shawnunified
+        '''
 
         if cudatensor:  # dataset is on GPU
             print('dataset is on GPU, num_workers=0')
@@ -106,7 +108,7 @@ class TestGroup(object):
             num_workers=0,
             pin_memory=True)
 
-    def _train(self, model, opt):
+    def _train(self, model, opt, profile_this_epoch=False):
         '''
         Train the given model using the given optimizer
         Record the time and loss
@@ -128,7 +130,7 @@ class TestGroup(object):
             end.synchronize()
             # utime.append(start.elapsed_time(end))
 
-            if self.args.profile and bid == 50:  # arbitrary step to profile.
+            if profile_this_epoch and self.args.profile and bid == 50:  # arbitrary step to profile.
                 print('starting profiling now...')
                 profiler.start()
             start.record()
@@ -143,7 +145,7 @@ class TestGroup(object):
             end.record()
             end.synchronize()
             btime.append(start.elapsed_time(end))  # time for backward propogation
-            if self.args.profile and bid == 50:  # arbitrary step to profile.
+            if profile_this_epoch and self.args.profile and bid == 50:  # arbitrary step to profile.
                 profiler.stop()
                 print('ended profiling now...')
                 # NOTE: don't profile stepping.
@@ -201,8 +203,7 @@ class TestGroup(object):
         # Init the model, the optimizer and some structures for logging
         self.reset()
 
-        model = NetLayer(self.hidden, k, self.layer, self.dropout,
-                         self.unified, crs=self.crs, strategy=self.strategy, shawnunified=self.shawnunified)
+        model = NetLayer(self.hidden, k, self.layer, self.dropout, layer_type=self.layer_type, strategy=self.strategy)
         print('==='*10)
         print('model:')
         print(model)
@@ -229,7 +230,7 @@ class TestGroup(object):
             start = torch.cuda.Event(True)
             end = torch.cuda.Event(True)
             start.record()
-            loss, ft, bt, ut = self._train(model, opt)
+            loss, ft, bt, ut = self._train(model, opt, profile_this_epoch= t==0)
             end.record()
             end.synchronize()
             ttime = start.elapsed_time(end)
@@ -246,15 +247,15 @@ class TestGroup(object):
                 acc = curacc
                 accc = self._evaluate(model, self.testloader, '    test')
         etime = [sum(t) for t in zip(ftime, btime, utime)]  # overall execution time
-        print('Best performance (by dev_acc):')
+        print('Best performance (by dev_acc):', file=self.file)
         print(
             'dev_acc={:.2f} | test_acc={:.2f} at epoch={}'.format(acc, accc, e),
             file=self.file,
             flush=True)
         means_stds = [(torch.sum(times), torch.mean(times), torch.std(times)) for times in map(torch.tensor, (ftime, btime, utime, train_times, etime))]
         print('(sum,mean,std)  fwd_time, bw_time, step_time, train_times, execution_times\n{:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}, {:.4f},{:.4f},{:.4f}' .format(
-            *means_stds[0], *means_stds[1], *means_stds[2], *means_stds[3], *means_stds[4]))
-        print('')
+            *means_stds[0], *means_stds[1], *means_stds[2], *means_stds[3], *means_stds[4]), file=self.file)
+        print('', file=self.file)
         print('', file=self.file)
 
     def _stat(self, name, t, agg=mean):

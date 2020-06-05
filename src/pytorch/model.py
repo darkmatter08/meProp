@@ -22,51 +22,67 @@ class NetLayer(nn.Module):
     Activation is ReLU
     '''
 
-    def __init__(self, hidden, k, layer, dropout=None, unified=False, crs=False, strategy=None, shawnunified=False):
+    def __init__(self, hidden, k, layer, dropout=None,
+        layer_type=None, strategy=None,
+        ):
         # layer: number of layers in this network.
         super(NetLayer, self).__init__()
         self.k = k
         self.layer = layer
         self.dropout = dropout
-        self.unified = unified
-        self.shawnunified = shawnunified
-        self.crs = crs
-        if unified and shawnunified:
-            print('invalid arguments, unified and shawnunified both True.')
-        if crs:
+        if layer_type is None:
+            raise ValueError('need to specify layer_type')
+        if layer_type == 'crs':
             assert strategy in ('random', 'det_top_k', 'nps')
-            # ignore value of 'unified'
+        self.layer_type = layer_type
         self.strategy = strategy
         self.model = nn.Sequential(self._create(hidden, k, layer, dropout))
-
+        
     def _create(self, hidden, k, layer, dropout=None):
         if layer == 1:
             return OrderedDict([Linear(784, 10, 0)])
         d = OrderedDict()
         for i in range(layer):
             if i == 0:  # input layer case
-                if self.crs:
+                if self.layer_type == 'crs':
                     d['linearCRS' + str(i)] = LinearCRS(784, hidden, k, strategy=self.strategy)
-                elif self.shawnunified:
-                    d['linearUnified_shawn' +str(i)] = LinearShawn(784, hidden, k)
+                elif self.layer_type == 'shawn_unified':
+                    d['linear_shawn_unified' +str(i)] = LinearShawn(784, hidden, k)
+                elif self.layer_type == 'meProp_unified':
+                    d['linear_meProp_unified' + str(i)] = Linear(784, hidden, k, unified=True)
+                elif self.layer_type == 'meProp':
+                    d['linear_meProp' + str(i)] = Linear(784, hidden, k, unified=False)
+                elif self.layer_type == 'pyTorch':
+                    d['linear_pyTorch' + str(i)] = torch.nn.Linear(784, hidden)
                 else:
-                    # d['linear' + str(i)] = Linear(784, hidden, k, unified=self.unified, shawnunified=self.shawnunified)
-                    d['linear' + str(i)] = Linear(784, hidden, k, unified=self.unified)
+                    raise ValueError('invalid layer type! {}'.format(self.layer_type))
                 d['relu' + str(i)] = nn.ReLU()
                 if dropout:
                     d['dropout' + str(i)] = nn.Dropout(p=dropout)
             elif i == layer - 1:  # final layer/readout layer.
-                # Do not put CRS in the final readout layer...
-                # d['linear' + str(i)] = Linear(hidden, 10, 0, unified=self.unified, shawnunified=self.shawnunified)
-                d['linear' + str(i)] = Linear(hidden, 10, 0, unified=self.unified)
+                # Do not sample on last layer
+                if self.layer_type in ('meProp_unified', 'shawn_unified'):
+                    d['linear' + str(i)] = Linear(hidden, 10, 0, unified=True)
+                elif self.layer_type in ('crs', 'meProp'):
+                    d['linear' + str(i)] = Linear(hidden, 10, 0, unified=False)
+                elif self.layer_type in ('pyTorch'):
+                    d['linear_pyTorch' + str(i)] = torch.nn.Linear(hidden, 10)
+                # unified=True for shawnunified, linear_meProp_unified
+                # unified=False for linearCRS, linear_meProp
+                # pytorch linear layer for linear_pyTorch
             else:  # standard middle layer
-                if self.crs:
+                if self.layer_type == 'crs':
                     d['linearCRS' + str(i)] = LinearCRS(hidden, hidden, k, strategy=self.strategy)
-                elif self.shawnunified:
-                    d['linearUnified_shawn' + str(i)] = LinearShawn(hidden, hidden, k)
+                elif self.layer_type == 'shawn_unified':
+                    d['linear_shawn_unified' + str(i)] = LinearShawn(hidden, hidden, k)
+                elif self.layer_type == 'meProp_unified':
+                    d['linear_meProp_unified' + str(i)] = Linear(hidden, hidden, k, unified=True)
+                elif self.layer_type == 'meProp':
+                    d['linear_meProp' + str(i)] = Linear(hidden, hidden, k, unified=False)
+                elif self.layer_type == 'pyTorch':
+                    d['linear_pyTorch' + str(i)] = torch.nn.Linear(hidden, hidden)
                 else:
-                    # d['linear' + str(i)] = Linear(hidden, hidden, k, unified=self.unified, shawnunified=self.shawnunified)
-                    d['linear' + str(i)] = Linear(hidden, hidden, k, unified=self.unified)
+                    raise ValueError('invalid layer type! {}'.format(self.layer_type))
                 d['relu' + str(i)] = nn.ReLU()
                 if dropout:
                     d['dropout' + str(i)] = nn.Dropout(p=dropout)

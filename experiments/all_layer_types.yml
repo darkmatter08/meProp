@@ -1,0 +1,59 @@
+description: jains-all_layers
+
+target:
+  cluster: rr1
+  vc: resrchvc
+environment:
+  image: pytorch/pytorch:1.4-cuda10.1-cudnn7-devel
+
+storage:
+  shawn:
+    storage_account_name: hpalangivm0
+    container_name: shawn
+    local_dir: /data/home/jains/shawn
+
+code:
+  local_dir: /data/home/jains/Documents/meProp/src/pytorch
+
+search:
+  job_template:
+    name: jains-all_layers__{layer_type}__profile_{profile}__batch_{batch}__hidden_{hidden}
+    sku: G1
+    sku_count: 1
+    command:
+    - pip freeze > img_pip_freeze.txt
+    - pip install --user torchvision==0.5.0
+    - >-
+      python -W ignore main_joint.py
+      --k {k}
+      --dropout 0
+      --n_layer 3
+      --d_minibatch {batch}
+      --layer_type {layer_type}
+      --n_epoch {epochs}
+      {profile}
+      --d_hidden {hidden}
+    submit_args:
+      container_args:
+        shm_size: 128G
+  type: grid
+  max_trials: 20
+  params:
+    - name: layer_type
+      spec: discrete
+      values: ['pyTorch', 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
+    - name: hidden
+      spec: discrete
+      values: ['8192', '512']
+    - name: k
+      spec: discrete
+      values: ['819']
+    - name: epochs
+      spec: discrete
+      values: ['20']
+    - name: profile
+      spec: discrete
+      values: ['']
+    - name: batch
+      spec: discrete
+      values: ['256']

@@ -1,0 +1,73 @@
+description: jains-crs_replicate
+
+target:
+  cluster: rr1
+  vc: resrchvc
+environment:
+  image: pytorch/pytorch:1.4-cuda10.1-cudnn7-devel
+
+storage:
+  shawn:
+    storage_account_name: hpalangivm0
+    container_name: shawn
+    local_dir: /data/home/jains/shawn
+
+code:
+  local_dir: /data/home/jains/Documents/meProp/src/pytorch
+
+search:
+  job_template:
+    name: jains-pyprof2_main_joint__{layer_type}__profile_{profile}__batch_{batch}__hidden_{hidden}
+    sku: G1
+    sku_count: 1
+    command:
+    - pip freeze > img_pip_freeze.txt
+    - pip install --user torchvision==0.5.0
+    - >-
+      python -W ignore main_joint.py
+      --k {k}
+      --dropout 0
+      --n_layer 3
+      --d_minibatch {batch}
+      --layer_type {layer_type}
+      --n_epoch {epochs}
+      {profile}
+      --d_hidden {hidden}
+    submit_args:
+      container_args:
+        shm_size: 128G
+  type: grid
+  max_trials: 20
+  params:
+    - name: layer_type
+      spec: discrete
+      values: ['crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
+    - name: hidden
+      spec: discrete
+      values: ['500']
+    - name: k
+      spec: discrete
+      values: ['50', '100', '150', '200', '250']
+    - name: epochs
+      spec: discrete
+      values: ['20']
+    - name: profile
+      spec: discrete
+      values: ['']
+    - name: batch
+      spec: discrete
+      values: ['50']
+
+# Attempt to replicate Figure 1c.
+# From Supplimentary Material of Approx. Tensor Ops.
+  # MLP for MNIST
+  # The MNIST dataset[29] includes 60K training examples and 10K test examples. We use 5K as validation set.
+  # Each example is a 28 × 28 gray-scale image of a handwritten digit.
+  # Our MLP model contains the following layers:
+  # • 784 × 500 fully-connected layer with RELU activations
+  # • 500 × 500 fully-connected layer
+  # • 500 × 10 fully-connected layer
+  # • Softmax 
+  # We use the Adam optimizer[39] with default parameters (learning rate=0.001,β1 = 0.9,β2 = 0.999, eps = 1e−08)
+  # As loss function we use cross-entropy. We use minibatch size of 50 and train the model for 20 epochs, reporting
+  # the test accuracy of the model with the highest accuracy on the validation set.

@@ -24,7 +24,6 @@ class Linear(nn.Module):
         self.out_ = out_
         self.k = k
         self.unified = unified
-        # self.shawnunified = shawnunified
 
         self.w = Parameter(torch.Tensor(self.in_, self.out_))
         self.b = Parameter(torch.Tensor(self.out_))
@@ -37,16 +36,12 @@ class Linear(nn.Module):
         self.b.data.uniform_(-stdv, stdv)
 
     def forward(self, x):
-        # if self.shawnunified:
-        #     return linearUnified_shawn(self.k)(x, self.w, self.b)
         if self.unified:
             return linearUnified(self.k)(x, self.w, self.b)
         else:
             return linear(self.k)(x, self.w, self.b)
 
     def __repr__(self):
-        # if self.shawnunified:
-        #     layer_description = 'shawnunified'
         if self.unified:
             layer_description = 'unified'
         else:

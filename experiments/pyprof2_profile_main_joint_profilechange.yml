@@ -1,0 +1,73 @@
+description: jains-pyprof2_main_joint
+
+target:
+  cluster: rr1
+  vc: resrchvc
+environment:
+  image: pytorch/pytorch:1.4-cuda10.1-cudnn7-devel
+
+storage:
+  shawn:
+    storage_account_name: hpalangivm0
+    container_name: shawn
+    local_dir: /data/home/jains/shawn
+
+code:
+  local_dir: /data/home/jains/Documents/meProp/src/pytorch
+
+search:
+  job_template:
+    name: jains-pyprof2_main_joint__{layer_type}__profile_{profile}__batch_{batch}__hidden_{hidden}
+    sku: G1
+    sku_count: 1
+    command:
+    - echo $$PT_OUTPUT_DIR
+    - pip freeze > img_pip_freeze.txt
+    - pip install --user torchvision==0.5.0
+    - git clone https://github.com/adityaiitb/pyprof2.git
+    - cd pyprof2
+    - pip install . --user
+    - cd ..
+    - export MYFILENAME=pyprof2__main_joint__{layer_type}__profile_{profile}__batch_{batch}__hidden_{hidden}.csv
+    - >-
+      nvprof -f -o net.sql --profile-from-start off --
+      python -W ignore main_joint.py
+      --k {k}
+      --dropout 0
+      --n_layer 3
+      --d_minibatch {batch}
+      --layer_type {layer_type}
+      --n_epoch {epochs}
+      {profile}
+      --d_hidden {hidden}
+    - cd pyprof2
+    - pyprof2/parse/parse.py ../net.sql > net.dict
+    - pyprof2/prof/prof.py --csv net.dict > $$MYFILENAME
+    - cat $$MYFILENAME
+    # - bash
+    # - cp $$MYFILENAME.log /mnt/shawn/.
+    submit_args:
+      container_args:
+        shm_size: 128G
+  type: grid
+  max_trials: 20
+  params:
+    - name: layer_type
+      spec: discrete
+      values: ['pyTorch'] #, 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
+      # values: ['meProp', 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
+    - name: hidden
+      spec: discrete
+      values: ['8192'] # ['512']
+    - name: k
+      spec: discrete
+      values: ['80'] # ['90', '30', '0']
+    - name: epochs
+      spec: discrete
+      values: ['1'] # if wanting to profile only, set this to 1.
+    - name: profile
+      spec: discrete
+      values: [''] #, '--profile']
+    - name: batch
+      spec: discrete
+      values: ['256']
