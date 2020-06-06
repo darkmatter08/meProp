@@ -23,7 +23,7 @@ search:
     command:
     - echo {experiment}
     - echo $$PT_OUTPUT_DIR
-    - export MYFILENAME=pyprof2__compute_norms_128_mm_small.csv
+    - export MYFILENAME=pyprof2__compute_norms_8192_mm_zero.csv
     - git clone https://github.com/adityaiitb/pyprof2.git
     - cd pyprof2
     - pip install . --user

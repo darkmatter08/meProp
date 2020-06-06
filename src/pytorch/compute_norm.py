@@ -25,7 +25,7 @@ for step in range(1000):
     start.record()
 
     # Actual compute to be profiled...
-    data = torch.rand(256, 256, device='cuda')
+    data = torch.rand(8192, 8192, device='cuda')
     
     # Similar to:
     # norm reduce_kernel T=(256,8192), fp32,	72671	W1	col_norms	        col_norms_A = torch.norm(A, dim=0)
@@ -37,6 +37,9 @@ for step in range(1000):
     # Similar to:
     # __matmul__	maxwell_sgemm_128x128_nn	A=(256,80),B=(80,8192),fp32,	73311		Compute D (i.e. y=x@w.T+b)	        D = cols_A @ rows_B	crs_mm -- det_top_k
     torch.mm(data[:256, :k], data[:k, :])
+
+    # Zero in place.
+    data.zero_()
 
     end.record()
     end.synchronize()

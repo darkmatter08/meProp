@@ -28,7 +28,7 @@ search:
     - cd pyprof2
     - pip install . --user
     - cd ..
-    - export MYFILENAME=pyprof2__main_joint__{layer_type}__profile_{profile}__batch_{batch}__hidden_{hidden}.csv
+    - export MYFILENAME=pyprof2__main_joint__layertype_pyTorch__profile_{profile}__batch_{batch}__hidden_{hidden}.csv
     - >-
       nvprof -f -o net.sql --profile-from-start off --
       python -W ignore main_joint.py
@@ -44,8 +44,8 @@ search:
     - pyprof2/parse/parse.py ../net.sql > net.dict
     - pyprof2/prof/prof.py --csv net.dict > $$MYFILENAME
     - cat $$MYFILENAME
-    # - bash
-    # - cp $$MYFILENAME.log /mnt/shawn/.
+    - cp $$MYFILENAME /mnt/shawn/.
+    - bash
     submit_args:
       container_args:
         shm_size: 128G
@@ -67,7 +67,7 @@ search:
       values: ['1'] # if wanting to profile only, set this to 1.
     - name: profile
       spec: discrete
-      values: [''] #, '--profile']
+      values: ['--profile']
     - name: batch
       spec: discrete
       values: ['256']
