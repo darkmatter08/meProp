@@ -41,7 +41,8 @@ search:
   params:
     - name: layer_type
       spec: discrete
-      values: ['pyTorch', 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
+      values: ['shawn_unified'] # 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
+      # values: ['pyTorch', 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
     - name: hidden
       spec: discrete
       values: ['8192', '512']

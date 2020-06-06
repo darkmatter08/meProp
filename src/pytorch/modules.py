@@ -17,7 +17,6 @@ class Linear(nn.Module):
     The initialization of w and b is the same with the default linear module.
     '''
 
-    # def __init__(self, in_, out_, k, unified=False, shawnunified=False):
     def __init__(self, in_, out_, k, unified=False):
         super(Linear, self).__init__()
         self.in_ = in_

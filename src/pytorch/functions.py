@@ -33,8 +33,19 @@ class linearUnified(Function):
         '''
         self.save_for_backward(x, w, b)
         y = x.new(x.size(0), w.size(1))
-        y.addmm_(0, 1, x, w)
+        # This code was originally written with pyTorch=0.3.0 according to README.md
+        # https://pytorch.org/docs/0.3.0/tensors.html#torch.Tensor.addmm_
+        # addmm_(beta=0, mat=1, alpha=1, mat1=x, mat2=w) → Tensor
+        # mat + (mat1 @ mat2)
+        # Here, we run the code on pyTorch=1.5.0
+        # https://pytorch.org/docs/stable/tensors.html#torch.Tensor.addmm_
+        # y.addmm_(mat1, mat2, *, beta=1, alpha=1) → Tensor
+        # y = beta * y + alpha * (mat1 @ mat2)
+        # Use explict arguments to resolve ambiguity.
+        y.addmm_(beta=0, alpha=1, mat1=x, mat2=w)
         self.add_buffer = x.new(x.size(0)).fill_(1)
+        # Adding the bias, but in a way that multiplies the bias
+        # based on the batch size.
         y.addr_(self.add_buffer, b)
         return y
 
@@ -174,9 +185,7 @@ class linearUnified_shawn(Function):
         We find that that implementation is slower in both forward and backward propagation on our devices.
         '''
         self.save_for_backward(x, w, b)
-
-        # result = x @ w.T + b
-        result = torch.addmm(b, x, w.T)  # Faster alternative.
+        result = torch.addmm(b, x, w.T, alpha=1, beta=1)
         return result
 
     def backward(self, dy):
@@ -191,16 +200,19 @@ class linearUnified_shawn(Function):
         dx = dw = db = None
         if self.k <= 0 or dy.shape[1] <= self.k:  # exact backprop, no top-k selection
             if self.needs_input_grad[1]:  # w
-                dw = dy.T @ x
+                # dw = dy.T @ x
+                dw = torch.mm(dy.T, x)
                 assert dw.shape == w.shape
 
             if self.needs_input_grad[0]:  # x
-                dx = dy @ w
+                # dx = dy @ w
+                dx = torch.mm(dy, w)
                 assert dx.shape == x.shape
 
             if self.needs_input_grad[2]:  # b
                 # TODO: work out the formula for this.
-                db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
+                # db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
+                db = torch.mv(dy.T, torch.ones(dy.shape[0], device=dy.device))
                 assert db.shape == b.shape
 
             return dx, dw, db
@@ -210,20 +222,22 @@ class linearUnified_shawn(Function):
             _, indexes = dy.abs().sum(0).topk(self.k)  # .topk applies to which dim? last dim only?
 
             if self.needs_input_grad[1]:  # w
-                partial_dw = dy.T[indexes, :] @ x
+                # partial_dw = dy.T[indexes, :] @ x
+                partial_dw = torch.mm(dy.T[indexes, :], x)
                 dw = torch.zeros_like(w)
                 # alternative to scatter_ or index_copy_
                 dw[indexes, :] = partial_dw
                 assert dw.shape == w.shape
 
             if self.needs_input_grad[0]:  # x
-                dx = dy[:, indexes] @ w[indexes, :]
+                # dx = dy[:, indexes] @ w[indexes, :]
+                dx = torch.mm(dy[:, indexes], w[indexes, :])
                 assert dx.shape == x.shape
 
             if self.needs_input_grad[2]:  # b
-                # TODO: what is the right formula for this?
-                # bias with batches???
-                db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
+                # TODO: confirm formula for bias with batches
+                # db = dy.T @ torch.ones(dy.shape[0], device=dy.device)
+                db = torch.mv(dy.T, torch.ones(dy.shape[0], device=dy.device))
                 assert db.shape == b.shape
 
         return dx, dw, db
