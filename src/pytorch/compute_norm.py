@@ -38,8 +38,16 @@ for step in range(1000):
     # __matmul__	maxwell_sgemm_128x128_nn	A=(256,80),B=(80,8192),fp32,	73311		Compute D (i.e. y=x@w.T+b)	        D = cols_A @ rows_B	crs_mm -- det_top_k
     torch.mm(data[:256, :k], data[:k, :])
 
+    # full matmul
+    torch.mm(data, data)
+
+    # Alloc an empty tensor on CUDA.
+    empty_tensor = torch.empty(8192, 8192, device='cuda')
     # Zero in place.
-    data.zero_()
+    empty_tensor.zero_()
+
+    # alloc zero tensor
+    zero_tensor = torch.zeros(8192, 8192, device='cuda')
 
     end.record()
     end.synchronize()

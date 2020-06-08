@@ -28,7 +28,7 @@ search:
     - cd pyprof2
     - pip install . --user
     - cd ..
-    - export MYFILENAME=pyprof2__main_joint__layertype_pyTorch__profile_{profile}__batch_{batch}__hidden_{hidden}.csv
+    - export MYFILENAME=pyprof2__main_joint__layertype_{layer_type}_NO_dw_buffer__profile_{profile}__batch_{batch}__hidden_{hidden}.csv
     - >-
       nvprof -f -o net.sql --profile-from-start off --
       python -W ignore main_joint.py
@@ -54,7 +54,7 @@ search:
   params:
     - name: layer_type
       spec: discrete
-      values: ['pyTorch'] #, 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
+      values: ['meProp_unified'] #, 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
       # values: ['meProp', 'meProp_unified', 'shawn_unified', 'pyTorch', 'crs --strategy det_top_k', 'crs --strategy random', 'crs --strategy nps']
     - name: hidden
       spec: discrete
