@@ -6,6 +6,8 @@ import torch
 from torch.autograd import Function
 
 
+FULL_DW_EXPERIMENT = False
+
 class linearUnified(Function):
     '''
     linear function with meProp, unified top-k across minibatch
@@ -69,8 +71,11 @@ class linearUnified(Function):
             if self.needs_input_grad[0]:
                 dx = torch.mm(pdy, w.index_select(-1, inds).t_())
             if self.needs_input_grad[1]:
-                dw = w.new(w.size()).zero_().index_copy_(
-                    -1, inds, torch.mm(x.t(), pdy))
+                if FULL_DW_EXPERIMENT:
+                    dw = torch.mm(x.t(), dy)
+                else:
+                    dw = w.new(w.size()).zero_().index_copy_(
+                        -1, inds, torch.mm(x.t(), pdy))
             if self.needs_input_grad[2]:
                 # torch.mv(): matrix-vector product
                 db = torch.mv(dy.t(), self.add_buffer)

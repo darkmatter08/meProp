@@ -11,8 +11,9 @@ if 1:
     pyprof2.init()
     PROFILE = True
 
+STEPS = 1000
 k = 80
-for step in range(1000):
+for step in range(STEPS):
     # data, target = data.cuda(), target.view(-1).cuda()
     start = torch.cuda.Event(True)
     end = torch.cuda.Event(True)
@@ -24,6 +25,7 @@ for step in range(1000):
         profiler.start()
     start.record()
 
+    '''
     # Actual compute to be profiled...
     data = torch.rand(8192, 8192, device='cuda')
     
@@ -48,6 +50,67 @@ for step in range(1000):
 
     # alloc zero tensor
     zero_tensor = torch.zeros(8192, 8192, device='cuda')
+    '''
+    
+    ''' 
+    # dw.shape == w.shape == (out, in)
+    # x.shape = (b, in)
+    # y.shape = (b, out)
+    # dy.T.shape = (out, b)
+    # full_dw = dy.T @ x
+    # full_dw = (out, b) @ (b, in)
+
+    # partial_dw = (out, b) @ (b, k) = (out, k)
+    partial_dw = dy.T @ x[:, indexes]
+    # dw = (out, in)
+    dw = torch.zeros_like(w)
+    # copy into dw a matrix of (out, k)
+    dw[:, indexes] = partial_dw  # alternative to scatter_ or index_copy_
+    '''
+    # indexes_all = torch.randperm(1000, device='cuda')  # not profiled.
+    # indexes = indexes_all[:k]  # not profiled
+
+    if 1:
+        out_size, in_size = (1024, 512)
+        b = 512
+        k = 64
+
+        w = torch.rand(out_size, in_size, device='cuda')
+        x = torch.rand(b, in_size, device='cuda')
+
+        # forward pass CRS --strategy random
+        # sample k random indexes!
+        indexes_all = torch.randperm(in_size, device=w.device)
+        indexes = indexes_all[:k]
+
+        # index_select_ like
+        x_sampled = x[:, indexes]
+        w_t_sampled = w.T[indexes, :]
+        # no expansion
+        y = torch.mm(x_sampled, w_t_sampled)
+        
+        # full forward mm()
+        full_y = torch.mm(x, w.T)
+
+        # backward pass
+        dy = torch.rand(b, out_size, device='cuda')
+        # index_select
+        sampled_x = x[:, indexes]
+        # mm
+        partial_dw = torch.mm(dy.T, sampled_x)
+        # alloc
+        dw = torch.zeros_like(w)
+        # expand
+        dw[:, indexes] = partial_dw  # alternative to scatter_ or index_copy_
+
+        # full backward mm
+        full_dw = torch.mm(dy.T, x)
+
+    ### TODO: layer_norm
+    # x = self.final_layer_norm(x)
+    # x = self.self_attn_layer_norm(x)
+    # The dim of x is torch.Size([21, 192, 512])
+
 
     end.record()
     end.synchronize()
@@ -58,4 +121,6 @@ for step in range(1000):
         print('ended profiling now...')
         # NOTE: don't profile stepping.
 
+print('STEPS executed:', STEPS)
+print('mean runtime (ms):', torch.mean(torch.tensor(runtime)).item())
 print('done')

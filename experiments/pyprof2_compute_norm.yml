@@ -23,7 +23,7 @@ search:
     command:
     - echo {experiment}
     - echo $$PT_OUTPUT_DIR
-    - export MYFILENAME=pyprof2__compute_norms_8192_mm_small_allocempty_zero_alloczero.csv
+    - export MYFILENAME=pyprof2__randperm_only.csv
     - git clone https://github.com/adityaiitb/pyprof2.git
     - cd pyprof2
     - pip install . --user
@@ -33,7 +33,7 @@ search:
       python compute_norm.py
     - cd pyprof2
     - pyprof2/parse/parse.py ../net.sql > net.dict
-    - pyprof2/prof/prof.py --csv net.dict > $$MYFILENAME
+    - pyprof2/prof/prof.py --csv -c idx,dir,sub,mod,op,kernel,params,trace,sil net.dict > $$MYFILENAME
     - cat $$MYFILENAME
     - cp $$MYFILENAME /mnt/shawn/.
     - bash
