@@ -78,10 +78,30 @@ for step in range(STEPS):
         w = torch.rand(out_size, in_size, device='cuda')
         x = torch.rand(b, in_size, device='cuda')
 
-        # forward pass CRS --strategy random
-        # sample k random indexes!
-        indexes_all = torch.randperm(in_size, device=w.device)
-        indexes = indexes_all[:k]
+        ###
+        # FORWARD PASS
+        ###
+        # CRS --strategy random
+        if 1:
+            # sample k random indexes!
+            indexes_all = torch.randperm(in_size, device=w.device)
+            indexes = indexes_all[:k]
+        # CRS --strategy det_top_k
+        if 0:
+            col_norms_A = torch.norm(x, dim=0)
+            row_norms_B = torch.norm(w.T, dim=1)
+            assert col_norms_A.shape == row_norms_B.shape
+            norm_products = col_norms_A * row_norms_B
+            assert norm_products.shape == col_norms_A.shape
+            # same device as norm_products
+            _, indexes = torch.topk(norm_products, k)
+        # CRS --strategy first_k
+        if 0:
+            indexes = torch.arange(k, device=w.device)
+        # CRS --strategy single_norm
+        if 0:
+            col_norms_A = torch.norm(x, dim=0)
+            _, indexes = torch.topk(col_norms_A, k)
 
         # index_select_ like
         x_sampled = x[:, indexes]
@@ -92,7 +112,9 @@ for step in range(STEPS):
         # full forward mm()
         full_y = torch.mm(x, w.T)
 
-        # backward pass
+        ###
+        # BACKWARD PASS
+        ###
         dy = torch.rand(b, out_size, device='cuda')
         # index_select
         sampled_x = x[:, indexes]
