@@ -23,14 +23,14 @@ search:
     command:
     - echo {experiment}
     - echo $$PT_OUTPUT_DIR
-    - export MYFILENAME=pyprof2__crs_random.csv
+    - export MYFILENAME=pyprof2__manual_compute_norm.csv
     - git clone https://github.com/adityaiitb/pyprof2.git
     - cd pyprof2
     - pip install . --user
     - cd ..
     - >-
       nvprof -f -o net.sql --profile-from-start off --
-      python compute_norm.py
+      python manual_compute_norm.py
     - cd pyprof2
     - pyprof2/parse/parse.py ../net.sql > net.dict
     - pyprof2/prof/prof.py --csv -c idx,dir,sub,mod,op,kernel,params,trace,sil net.dict > $$MYFILENAME
